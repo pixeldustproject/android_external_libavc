@@ -1732,15 +1732,7 @@ WORD32 ih264d_video_decode(iv_obj_t *dec_hdl, void *pv_api_ip, void *pv_api_op)
 
     ps_dec->i4_frametype = -1;
     ps_dec->i4_content_type = -1;
-    /*
-     * For field pictures, set the bottom and top picture decoded u4_flag correctly.
-     */
-    {
-        if((TOP_FIELD_ONLY | BOT_FIELD_ONLY) == ps_dec->u1_top_bottom_decoded)
-        {
-            ps_dec->u1_top_bottom_decoded = 0;
-        }
-    }
+
     ps_dec->u4_slice_start_code_found = 0;
 
     /* In case the deocder is not in flush mode(in shared mode),
@@ -1894,7 +1886,7 @@ WORD32 ih264d_video_decode(iv_obj_t *dec_hdl, void *pv_api_ip, void *pv_api_op)
     ps_dec->u2_cur_slice_num = 0;
     ps_dec->cur_dec_mb_num = 0;
     ps_dec->cur_recon_mb_num = 0;
-    ps_dec->u4_first_slice_in_pic = 2;
+    ps_dec->u4_first_slice_in_pic = 1;
     ps_dec->u1_first_pb_nal_in_pic = 1;
     ps_dec->u1_slice_header_done = 0;
     ps_dec->u1_dangling_field = 0;
@@ -1956,7 +1948,9 @@ WORD32 ih264d_video_decode(iv_obj_t *dec_hdl, void *pv_api_ip, void *pv_api_op)
         if(buflen == -1)
             buflen = 0;
         /* Ignore bytes beyond the allocated size of intermediate buffer */
-        buflen = MIN(buflen, buf_size);
+        /* Since 8 bytes are read ahead, ensure 8 bytes are free at the
+        end of the buffer, which will be memset to 0 after emulation prevention */
+        buflen = MIN(buflen, buf_size - 8);
 
         bytes_consumed = buflen + u4_length_of_start_code;
         ps_dec_op->u4_num_bytes_consumed += bytes_consumed;
@@ -2291,10 +2285,6 @@ WORD32 ih264d_video_decode(iv_obj_t *dec_hdl, void *pv_api_ip, void *pv_api_op)
         {
             /* Calling Function to deblock Picture and Display */
             ret = ih264d_deblock_display(ps_dec);
-            if(ret != 0)
-            {
-                return IV_FAIL;
-            }
         }
 
 
@@ -2390,6 +2380,37 @@ WORD32 ih264d_video_decode(iv_obj_t *dec_hdl, void *pv_api_ip, void *pv_api_op)
 
         }
     }
+
+    if((TOP_FIELD_ONLY | BOT_FIELD_ONLY) == ps_dec->u1_top_bottom_decoded)
+    {
+        ps_dec->u1_top_bottom_decoded = 0;
+    }
+    /*--------------------------------------------------------------------*/
+    /* Do End of Pic processing.                                          */
+    /* Should be called only if frame was decoded in previous process call*/
+    /*--------------------------------------------------------------------*/
+    if(ps_dec->u4_pic_buf_got == 1)
+    {
+        if(1 == ps_dec->u1_last_pic_not_decoded)
+        {
+            ret = ih264d_end_of_pic_dispbuf_mgr(ps_dec);
+
+            if(ret != OK)
+                return ret;
+
+            ret = ih264d_end_of_pic(ps_dec);
+            if(ret != OK)
+                return ret;
+        }
+        else
+        {
+            ret = ih264d_end_of_pic(ps_dec);
+            if(ret != OK)
+                return ret;
+        }
+
+    }
+
 
     /*Data memory barrier instruction,so that yuv write by the library is complete*/
     DATA_SYNC();

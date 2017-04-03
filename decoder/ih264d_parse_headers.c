@@ -894,6 +894,15 @@ WORD32 ih264d_parse_sps(dec_struct_t *ps_dec, dec_bit_stream_t *ps_bitstrm)
             return IVD_STREAM_WIDTH_HEIGHT_NOT_SUPPORTED;
         }
 
+        /* If MBAff is enabled, decoder support is limited to streams with
+         * width less than half of H264_MAX_FRAME_WIDTH.
+         * In case of MBAff decoder processes two rows at a time
+         */
+        if((u2_pic_wd << ps_seq->u1_mb_aff_flag) > H264_MAX_FRAME_WIDTH)
+        {
+            return IVD_STREAM_WIDTH_HEIGHT_NOT_SUPPORTED;
+        }
+
         ps_dec->u2_disp_height = i4_cropped_ht;
 
         ps_dec->u2_disp_width = i4_cropped_wd;
@@ -1073,13 +1082,6 @@ WORD32 ih264d_parse_nal_unit(iv_obj_t *dec_hdl,
                                             (UWORD8)(u1_nal_unit_type
                                                             == IDR_SLICE_NAL),
                                             u1_nal_ref_idc, ps_dec);
-
-                            if((ps_dec->u4_first_slice_in_pic != 0)&&
-                                ((ps_dec->ps_dec_err_status->u1_err_flag & REJECT_CUR_PIC) == 0))
-                            {
-                                /*  if the first slice header was not valid set to 1 */
-                                ps_dec->u4_first_slice_in_pic = 1;
-                            }
 
                             if(i_status != OK)
                             {

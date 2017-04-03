@@ -1348,6 +1348,10 @@ WORD32 ih264d_parse_inter_slice_data_cavlc(dec_struct_t * ps_dec,
         if(u1_mbaff)
         {
             ih264d_update_mbaff_left_nnz(ps_dec, ps_cur_mb_info);
+            if(!uc_more_data_flag && !i2_mb_skip_run && (0 == (i2_cur_mb_addr & 1)))
+            {
+                return ERROR_EOB_FLUSHBITS_T;
+            }
         }
         /**************************************************************/
         /* Get next Macroblock address                                */
@@ -1455,7 +1459,7 @@ WORD32 ih264d_mark_err_slice_skip(dec_struct_t * ps_dec,
     UWORD32 u1_mbaff = ps_slice->u1_mbaff_frame_flag;
     parse_part_params_t *ps_part_info;
     WORD32 ret;
-
+    UNUSED(u1_is_idr_slice);
 
     if(ps_dec->ps_dec_err_status->u1_err_flag & REJECT_CUR_PIC)
     {
@@ -1472,16 +1476,6 @@ WORD32 ih264d_mark_err_slice_skip(dec_struct_t * ps_dec,
     {
         /* first slice - missing/header corruption */
         ps_dec->ps_cur_slice->u2_frame_num = u2_frame_num;
-
-
-        if(!ps_dec->u1_first_slice_in_stream)
-        {
-            ih264d_end_of_pic(ps_dec, u1_is_idr_slice,
-                ps_dec->ps_cur_slice->u2_frame_num);
-            ps_dec->s_cur_pic_poc.u2_frame_num =
-                ps_dec->ps_cur_slice->u2_frame_num;
-        }
-
         {
             WORD32 i, j, poc = 0;
 
@@ -1510,7 +1504,7 @@ WORD32 ih264d_mark_err_slice_skip(dec_struct_t * ps_dec,
             //if valid SPS PPS is not found return error
             if(j == -1)
             {
-                return ERROR_INV_SPS_PPS_T;
+                return ERROR_INV_SLICE_HDR_T;
             }
 
             /* call ih264d_start_of_pic only if it was not called earlier*/
@@ -1572,7 +1566,6 @@ WORD32 ih264d_mark_err_slice_skip(dec_struct_t * ps_dec,
                 }
             }
         }
-        ps_dec->u4_first_slice_in_pic = 0;
     }
     else
     {
