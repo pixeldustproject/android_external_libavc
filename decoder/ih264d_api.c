@@ -1002,7 +1002,6 @@ void ih264d_init_decoder(void * ps_dec_params)
     ps_dec->ps_cur_sps = NULL;
     ps_dec->u1_init_dec_flag = 0;
     ps_dec->u1_first_slice_in_stream = 1;
-    ps_dec->u1_first_pb_nal_in_pic = 1;
     ps_dec->u1_last_pic_not_decoded = 0;
     ps_dec->u4_app_disp_width = 0;
     ps_dec->i4_header_decoded = 0;
@@ -1409,9 +1408,8 @@ WORD32 ih264d_allocate_static_bufs(iv_obj_t **dec_hdl, void *pv_api_ip, void *pv
     pu1_buf += size / 2;
     ps_dec->ps_dpb_mgr->ps_init_dpb[1][0] = (struct pic_buffer_t *)pu1_buf;
 
-    size = (sizeof(UWORD32) * 3
-                        * (MAX_FRAMES * MAX_FRAMES))
-                        << 3;
+    size = (sizeof(UWORD32) * 2 * 3
+                        * ((MAX_FRAMES << 1) * (MAX_FRAMES << 1)) * 2);
     pv_buf = pf_aligned_alloc(pv_mem_ctxt, 128, size);
     RETURN_IF((NULL == pv_buf), IV_FAIL);
     ps_dec->pu4_mbaff_wt_mat = pv_buf;
@@ -1920,7 +1918,6 @@ WORD32 ih264d_video_decode(iv_obj_t *dec_hdl, void *pv_api_ip, void *pv_api_op)
     ps_dec->cur_dec_mb_num = 0;
     ps_dec->cur_recon_mb_num = 0;
     ps_dec->u4_first_slice_in_pic = 1;
-    ps_dec->u1_first_pb_nal_in_pic = 1;
     ps_dec->u1_slice_header_done = 0;
     ps_dec->u1_dangling_field = 0;
 
@@ -1928,6 +1925,7 @@ WORD32 ih264d_video_decode(iv_obj_t *dec_hdl, void *pv_api_ip, void *pv_api_op)
     ps_dec->u4_bs_deblk_thread_created = 0;
     ps_dec->u4_cur_bs_mb_num = 0;
     ps_dec->u4_start_recon_deblk  = 0;
+    ps_dec->u4_sps_cnt_in_process = 0;
 
     DEBUG_THREADS_PRINTF(" Starting process call\n");
 
@@ -2309,6 +2307,10 @@ WORD32 ih264d_video_decode(iv_obj_t *dec_hdl, void *pv_api_ip, void *pv_api_op)
             {
                 ps_dec->u1_top_bottom_decoded |= TOP_FIELD_ONLY;
             }
+        }
+        else
+        {
+                ps_dec->u1_top_bottom_decoded = TOP_FIELD_ONLY | BOT_FIELD_ONLY;
         }
 
         /* if new frame in not found (if we are still getting slices from previous frame)
