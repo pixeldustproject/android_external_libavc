@@ -484,7 +484,7 @@ WORD32 ih264d_parse_sps(dec_struct_t *ps_dec, dec_bit_stream_t *ps_bitstrm)
     UWORD32 *pu4_bitstrm_buf = ps_bitstrm->pu4_buffer;
     UWORD32 *pu4_bitstrm_ofst = &ps_bitstrm->u4_ofst;
     UWORD8 u1_frm, uc_constraint_set0_flag, uc_constraint_set1_flag;
-
+    WORD32 i4_cropped_ht, i4_cropped_wd;
     UWORD32 u4_temp;
     WORD32 pic_height_in_map_units_minus1 = 0;
     UWORD32 u2_pic_wd = 0;
@@ -496,7 +496,7 @@ WORD32 ih264d_parse_sps(dec_struct_t *ps_dec, dec_bit_stream_t *ps_bitstrm)
     UWORD32 u2_crop_offset_y = 0;
     UWORD32 u2_crop_offset_uv = 0;
     WORD32 ret;
-
+    UWORD32 u4_num_reorder_frames;
     /* High profile related syntax element */
     WORD32 i4_i;
     /* G050 */
@@ -564,10 +564,23 @@ WORD32 ih264d_parse_sps(dec_struct_t *ps_dec, dec_bit_stream_t *ps_bitstrm)
     /*--------------------------------------------------------------------*/
 
     ps_seq = ps_dec->pv_scratch_sps_pps;
-    *ps_seq = ps_dec->ps_sps[u1_seq_parameter_set_id];
+    if(ps_dec->i4_header_decoded & 1)
+    {
+        *ps_seq = *ps_dec->ps_cur_sps;
+    }
 
-    if(NULL == ps_dec->ps_cur_sps)
-        ps_dec->ps_cur_sps = ps_seq;
+
+    if((ps_dec->i4_header_decoded & 1) && (ps_seq->u1_profile_idc != u1_profile_idc))
+    {
+        ps_dec->u1_res_changed = 1;
+        return IVD_RES_CHANGED;
+    }
+
+    if((ps_dec->i4_header_decoded & 1) && (ps_seq->u1_level_idc != u1_level_idc))
+    {
+        ps_dec->u1_res_changed = 1;
+        return IVD_RES_CHANGED;
+    }
 
     ps_seq->u1_profile_idc = u1_profile_idc;
     ps_seq->u1_level_idc = u1_level_idc;
@@ -735,6 +748,14 @@ WORD32 ih264d_parse_sps(dec_struct_t *ps_dec, dec_bit_stream_t *ps_bitstrm)
     {
         return ERROR_NUM_REF;
     }
+
+    /* Compare with older num_ref_frames is header is already once */
+    if((ps_dec->i4_header_decoded & 1) && (ps_seq->u1_num_ref_frames != u4_temp))
+    {
+        ps_dec->u1_res_changed = 1;
+        return IVD_RES_CHANGED;
+    }
+
     ps_seq->u1_num_ref_frames = u4_temp;
     COPYTHECONTEXT("SPS: num_ref_frames",ps_seq->u1_num_ref_frames);
 
@@ -843,7 +864,6 @@ WORD32 ih264d_parse_sps(dec_struct_t *ps_dec, dec_bit_stream_t *ps_bitstrm)
         UWORD16 u2_btm_ofst = 0;
         UWORD8 u1_frm_mbs_flag;
         UWORD8 u1_vert_mult_factor;
-        WORD32 i4_cropped_ht, i4_cropped_wd;
 
         if(u1_frame_cropping_flag)
         {
@@ -879,12 +899,12 @@ WORD32 ih264d_parse_sps(dec_struct_t *ps_dec, dec_bit_stream_t *ps_bitstrm)
             return ERROR_INV_SPS_PPS_T;
         }
 
-        if((3 == ps_dec->i4_header_decoded) && (ps_dec->u2_pic_wd != u2_pic_wd))
+        if((ps_dec->i4_header_decoded & 1) && (ps_dec->u2_pic_wd != u2_pic_wd))
         {
             ps_dec->u1_res_changed = 1;
             return IVD_RES_CHANGED;
         }
-        if((3 == ps_dec->i4_header_decoded) && (ps_dec->u2_pic_ht != u2_pic_ht))
+        if((ps_dec->i4_header_decoded & 1) && (ps_dec->u2_pic_ht != u2_pic_ht))
         {
             ps_dec->u1_res_changed = 1;
             return IVD_RES_CHANGED;
@@ -905,18 +925,49 @@ WORD32 ih264d_parse_sps(dec_struct_t *ps_dec, dec_bit_stream_t *ps_bitstrm)
             return IVD_STREAM_WIDTH_HEIGHT_NOT_SUPPORTED;
         }
 
-        ps_dec->u2_disp_height = i4_cropped_ht;
-
-        ps_dec->u2_disp_width = i4_cropped_wd;
-
     }
 
+    /* Backup u4_num_reorder_frames if header is already decoded */
+    if((ps_dec->i4_header_decoded & 1) &&
+                    (1 == ps_seq->u1_vui_parameters_present_flag) &&
+                    (1 == ps_seq->s_vui.u1_bitstream_restriction_flag))
+    {
+        u4_num_reorder_frames =  ps_seq->s_vui.u4_num_reorder_frames;
+    }
+    else
+    {
+        u4_num_reorder_frames = -1;
+    }
     if(1 == ps_seq->u1_vui_parameters_present_flag)
     {
         ret = ih264d_parse_vui_parametres(&ps_seq->s_vui, ps_bitstrm);
         if(ret != OK)
             return ret;
     }
+
+    /* Compare older u4_num_reorder_frames with the new one if header is already decoded */
+    if((ps_dec->i4_header_decoded & 1) &&
+                    (-1 != (WORD32)u4_num_reorder_frames) &&
+                    (1 == ps_seq->u1_vui_parameters_present_flag) &&
+                    (1 == ps_seq->s_vui.u1_bitstream_restriction_flag) &&
+                    (ps_seq->s_vui.u4_num_reorder_frames != u4_num_reorder_frames))
+    {
+        ps_dec->u1_res_changed = 1;
+        return IVD_RES_CHANGED;
+    }
+
+    /* In case bitstream read has exceeded the filled size, then
+     return an error */
+    if (ps_bitstrm->u4_ofst > ps_bitstrm->u4_max_ofst)
+    {
+        return ERROR_INV_SPS_PPS_T;
+    }
+
+    /*--------------------------------------------------------------------*/
+    /* All initializations to ps_dec are beyond this point                */
+    /*--------------------------------------------------------------------*/
+    ps_dec->u2_disp_height = i4_cropped_ht;
+    ps_dec->u2_disp_width = i4_cropped_wd;
 
     ps_dec->u2_pic_wd = u2_pic_wd;
     ps_dec->u2_pic_ht = u2_pic_ht;
@@ -936,14 +987,9 @@ WORD32 ih264d_parse_sps(dec_struct_t *ps_dec, dec_bit_stream_t *ps_bitstrm)
     ps_dec->u2_crop_offset_y = u2_crop_offset_y;
     ps_dec->u2_crop_offset_uv = u2_crop_offset_uv;
 
-    /* In case bitstream read has exceeded the filled size, then
-       return an error */
-    if(ps_bitstrm->u4_ofst > ps_bitstrm->u4_max_ofst)
-    {
-        return ERROR_INV_SPS_PPS_T;
-    }
     ps_seq->u1_is_valid = TRUE;
     ps_dec->ps_sps[u1_seq_parameter_set_id] = *ps_seq;
+    ps_dec->ps_cur_sps = &ps_dec->ps_sps[u1_seq_parameter_set_id];
 
     return OK;
 }
@@ -1112,6 +1158,16 @@ WORD32 ih264d_parse_nal_unit(iv_obj_t *dec_hdl,
                     /* ! */
                     ih264d_rbsp_to_sodb(ps_dec->ps_bitstrm);
                     i_status = ih264d_parse_sps(ps_dec, ps_bitstrm);
+                    ps_dec->u4_sps_cnt_in_process++;
+                    /*If a resolution change happens within a process call, due to multiple sps
+                     * we will not support it.
+                     */
+                    if((ps_dec->u4_sps_cnt_in_process > 1 ) &&
+                                    (i_status == IVD_RES_CHANGED))
+                    {
+                        i_status = ERROR_INV_SPS_PPS_T;
+                        ps_dec->u1_res_changed = 0;
+                    }
                     if(i_status == ERROR_INV_SPS_PPS_T)
                         return i_status;
                     if(!i_status)
