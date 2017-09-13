@@ -1006,8 +1006,7 @@ WORD32 ih264d_parse_inter_slice_data_cabac(dec_struct_t * ps_dec,
         {
             ih264d_update_mbaff_left_nnz(ps_dec, ps_cur_mb_info);
         }
-        /* Next macroblock information */
-        i2_cur_mb_addr++;
+
 
         if(ps_cur_mb_info->u1_topmb && u1_mbaff)
             uc_more_data_flag = 1;
@@ -1019,6 +1018,15 @@ WORD32 ih264d_parse_inter_slice_data_cabac(dec_struct_t * ps_dec,
             COPYTHECONTEXT("Decode Sliceterm",!uc_more_data_flag);
         }
 
+        if(u1_mbaff)
+        {
+            if(!uc_more_data_flag && (0 == (i2_cur_mb_addr & 1)))
+            {
+                return ERROR_EOB_FLUSHBITS_T;
+            }
+        }
+        /* Next macroblock information */
+        i2_cur_mb_addr++;
         u1_num_mbs++;
         u1_num_mbsNby2++;
         ps_parse_mb_data++;
@@ -1969,23 +1977,7 @@ WORD32 ih264d_parse_pslice(dec_struct_t *ps_dec, UWORD16 u2_first_mb_in_slice)
         UWORD8 uc_refIdxReFlagL0 = ih264d_get_bit_h264(ps_bitstrm);
         COPYTHECONTEXT("SH: ref_pic_list_reordering_flag_l0",uc_refIdxReFlagL0);
 
-        /* Initialize the Reference list once in Picture if the slice type    */
-        /* of first slice is between 5 to 9 defined in table 7.3 of standard  */
-        /* If picture contains both P & B slices then Initialize the Reference*/
-        /* List only when it switches from P to B and B to P                     */
-        {
-            UWORD8 init_idx_flg = (ps_dec->u1_pr_sl_type
-                            != ps_dec->ps_cur_slice->u1_slice_type);
-            if(ps_dec->u1_first_pb_nal_in_pic
-                            || (init_idx_flg & !ps_dec->u1_sl_typ_5_9)
-                            || ps_dec->u1_num_ref_idx_lx_active_prev
-                                            != ps_cur_slice->u1_num_ref_idx_lx_active[0])
-            {
-                ih264d_init_ref_idx_lx_p(ps_dec);
-            }
-            if(ps_dec->u1_first_pb_nal_in_pic & ps_dec->u1_sl_typ_5_9)
-                ps_dec->u1_first_pb_nal_in_pic = 0;
-        }
+        ih264d_init_ref_idx_lx_p(ps_dec);
         /* Store the value for future slices in the same picture */
         ps_dec->u1_num_ref_idx_lx_active_prev =
                         ps_cur_slice->u1_num_ref_idx_lx_active[0];
